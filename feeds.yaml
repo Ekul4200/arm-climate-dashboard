@@ -1,0 +1,24 @@
+ai_climate:
+  - https://feeds.arstechnica.com/arstechnica/technology-lab
+  - https://feeds.feedburner.com/cleantechnica/clean-tech
+  - https://www.datacenterdynamics.com/en/rss/
+  - https://greenbiz.com/rss.xml
+  - https://www.nextplatform.com/feed/
+  - https://news.google.com/rss/search?q=AI+data+centers+energy+use
+
+regulations:
+  - https://www.edie.net/feed/
+  - https://www.resilience.org/feed/
+  - https://www.iea.org/news/rss
+  - https://www.carbonbrief.org/feed/
+  - https://energycentral.com/rss.xml
+  - https://news.google.com/rss/search?q=climate+reporting+Scope+3+regulation
+
+climate_events:
+  - https://www.unep.org/rss.xml
+  - https://climate.nasa.gov/rss/
+  - https://www.noaa.gov/news/rss.xml
+  - https://www.nature.com/subjects/climate-change/rss.xml
+  - https://news.google.com/rss/search?q=climate+impact+events+global+temperature+records
+
+
