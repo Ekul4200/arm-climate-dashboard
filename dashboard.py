@@ -1,27 +1,22 @@
 import streamlit as st
-import gspread
 import pandas as pd
-from google.oauth2.service_account import Credentials
 from datetime import datetime
+import plotly.express as px
 import re
 from collections import Counter
-from openai import OpenAI
-from dotenv import load_dotenv
-import os
-import plotly.express as px
 from sklearn.feature_extraction.text import ENGLISH_STOP_WORDS
-import webbrowser
+from google.oauth2.service_account import Credentials
+import gspread
+import json
+from openai import OpenAI
 
 # --- Setup ---
 
-load_dotenv()
-client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+client = OpenAI(api_key=st.secrets["OPENAI_API_KEY"])
 
-SCOPES = [
-    "https://www.googleapis.com/auth/spreadsheets",
-    "https://www.googleapis.com/auth/drive"
-]
-creds = Credentials.from_service_account_file("credentials.json", scopes=SCOPES)
+scopes = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
+creds_dict = json.loads(st.secrets["GOOGLE_CREDENTIALS"])
+creds = Credentials.from_service_account_info(creds_dict, scopes=scopes)
 client_gsheet = gspread.authorize(creds)
 
 SHEET_NAME = "Monthly Climate Summaries"
@@ -32,7 +27,6 @@ data = rows[1:]
 df = pd.DataFrame(data, columns=headers)
 
 # --- Data Parsing ---
-
 def extract_month(summary_text):
     try:
         if "Relevance to Arm:" in summary_text:
@@ -65,16 +59,14 @@ df["Month"] = df["gpt_summary"].apply(extract_month)
 df["Relevance"] = df["gpt_summary"].apply(extract_relevance)
 df["Themes"] = df["gpt_summary"].apply(extract_themes)
 
-# --- Streamlit UI ---
+# --- UI ---
 st.title("🌍 Arm Climate Trends Dashboard")
 st.markdown(f"⏱ Last updated: **{datetime.now().strftime('%d %B %Y')}**")
 
-# Month selector
 available_months = sorted(df["Month"].unique(), reverse=True)
 selected_month = st.selectbox("📅 View month:", available_months)
 df_filtered = df[df["Month"] == selected_month]
 
-# Filters
 categories = df_filtered["category"].unique()
 selected_categories = st.multiselect("📂 Filter by category:", categories, default=list(categories))
 relevance_options = ["High", "Medium"]
@@ -89,12 +81,10 @@ def relevance_filter(summary):
 df_filtered = df_filtered[df_filtered["category"].isin(selected_categories)]
 df_filtered = df_filtered[df_filtered["gpt_summary"].apply(relevance_filter)]
 
-# --- GPT Monthly Overview (Bullet Style at Top) ---
+# --- GPT Monthly Overview ---
 st.markdown("## 🧠 What to Know This Month")
-
 try:
     top_summaries = "\n\n".join(df_filtered["gpt_summary"].head(10).tolist())
-
     overview_prompt = f"""
 You are a sustainability strategy analyst at a semiconductor company (Arm).
 Based on the summaries below, extract the **5 most important insights or trends** from this month's climate-related activity.
@@ -105,15 +95,12 @@ Summaries:
 
 Return exactly 5 bullet points.
 """
-
     response = client.chat.completions.create(
         model="gpt-3.5-turbo",
         messages=[{"role": "user", "content": overview_prompt}],
         temperature=0.4
     )
-
     st.markdown(response.choices[0].message.content.strip())
-
 except Exception as e:
     st.warning(f"⚠️ Could not generate overview: {e}")
 
@@ -163,7 +150,7 @@ else:
         st.markdown(f"🏷️ Category: `{row['category']}`")
         st.markdown(f"📝 {row['gpt_summary'].split('Summary:', 1)[-1].strip()}")
 
-# --- Article List ---
+# --- Full Article List ---
 st.markdown("## 📚 All Filtered Summaries")
 for _, row in df_filtered.iterrows():
     st.markdown("----")
@@ -175,31 +162,3 @@ for _, row in df_filtered.iterrows():
 # --- CSV Download ---
 csv = df_filtered.to_csv(index=False).encode("utf-8")
 st.download_button("📥 Download this month's summaries (CSV)", csv, file_name=f"{selected_month}_summaries.csv")
-
-# --- Printable HTML Export Button ---
-if st.button("🖨 Export Monthly Brief (Open as Printable HTML)"):
-    html_path = f"brief_{selected_month.replace(' ', '_')}.html"
-    with open(html_path, "w", encoding="utf-8") as f:
-        f.write(f"<html><head><meta charset='utf-8'><style>")
-        f.write("""
-            body { font-family: Arial; margin: 2em; }
-            h1 { font-size: 24px; }
-            h2 { font-size: 18px; color: #2b7a78; }
-            .article { margin-bottom: 2em; padding-bottom: 1em; border-bottom: 1px solid #ccc; }
-            a { color: #1b6ca8; text-decoration: none; }
-        """)
-        f.write("</style></head><body>")
-        f.write(f"<h1>Monthly Brief – {selected_month}</h1>")
-        f.write(f"<p>Total summaries: {len(df_filtered)}</p>")
-
-        for _, row in df_filtered.iterrows():
-            f.write("<div class='article'>")
-            f.write(f"<h2>{row['original_title']}</h2>")
-            f.write(f"<p><strong>Category:</strong> {row['category']}</p>")
-            f.write(f"<p>{row['gpt_summary'].replace(chr(10), '<br>')}</p>")
-            f.write(f"<p><a href='{row['link']}' target='_blank'>🔗 Read original article</a></p>")
-            f.write("</div>")
-
-        f.write("</body></html>")
-
-    webbrowser.open(f"file://{os.path.abspath(html_path)}")
