@@ -104,11 +104,12 @@ def relevance_filter(summary):
 df_filtered = df_filtered[df_filtered["category"].isin(selected_categories)]
 df_filtered = df_filtered[df_filtered["gpt_summary"].apply(relevance_filter)]
 
-# --- GPT Overview ---
+# --- GPT Overview (Manually Triggered) ---
 st.markdown("## 🧠 What to Know This Month")
-try:
-    top_summaries = "\n\n".join(df_filtered["gpt_summary"].head(10).tolist())
-    overview_prompt = f"""
+if st.button("Generate GPT Overview"):
+    try:
+        top_summaries = "\n\n".join(df_filtered["gpt_summary"].head(10).tolist())
+        overview_prompt = f"""
 You are a sustainability strategy analyst at a semiconductor company (Arm).
 Based on the summaries below, extract the **5 most important insights or trends** from this month's climate-related activity.
 Each insight should be 1 bullet point and include relevant company names, themes (e.g. Scope 3, regulation, datacenter energy), or changes in the policy landscape.
@@ -118,14 +119,16 @@ Summaries:
 
 Return exactly 5 bullet points.
 """
-    response = client.chat.completions.create(
-        model="gpt-3.5-turbo",
-        messages=[{"role": "user", "content": overview_prompt}],
-        temperature=0.4
-    )
-    st.markdown(response.choices[0].message.content.strip())
-except Exception as e:
-    st.warning(f"⚠️ GPT summary generation failed: {e}")
+        response = client.chat.completions.create(
+            model="gpt-3.5-turbo",
+            messages=[{"role": "user", "content": overview_prompt}],
+            temperature=0.4
+        )
+        st.markdown(response.choices[0].message.content.strip())
+    except Exception as e:
+        st.warning(f"⚠️ GPT summary generation failed: {e}")
+else:
+    st.info("Click the button above to generate this month's GPT overview.")
 
 # --- Monthly Stats ---
 st.markdown("## 📊 Monthly Stats & Mentions")
