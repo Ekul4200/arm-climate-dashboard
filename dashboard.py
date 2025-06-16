@@ -10,23 +10,45 @@ import gspread
 import json
 from openai import OpenAI
 
-# --- Setup ---
+# --- Page Setup ---
+st.set_page_config(page_title="Arm Climate Dashboard", layout="wide")
+st.title("🌍 Arm Climate Trends Dashboard")
+st.markdown(f"⏱ Last updated: **{datetime.now().strftime('%d %B %Y')}**")
 
-client = OpenAI(api_key=st.secrets["OPENAI_API_KEY"])
+# --- Secrets Check ---
+if "OPENAI_API_KEY" not in st.secrets or "GOOGLE_CREDENTIALS" not in st.secrets:
+    st.error("🚫 Missing API credentials. Please update Streamlit Secrets.")
+    st.stop()
 
-scopes = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
-creds_dict = json.loads(st.secrets["GOOGLE_CREDENTIALS"])
-creds = Credentials.from_service_account_info(creds_dict, scopes=scopes)
-client_gsheet = gspread.authorize(creds)
+# --- Connect to APIs Safely ---
+try:
+    client = OpenAI(api_key=st.secrets["OPENAI_API_KEY"])
+    scopes = [
+        "https://www.googleapis.com/auth/spreadsheets",
+        "https://www.googleapis.com/auth/drive"
+    ]
+    creds = Credentials.from_service_account_info(
+        json.loads(st.secrets["GOOGLE_CREDENTIALS"]),
+        scopes=scopes
+    )
+    client_gsheet = gspread.authorize(creds)
+except Exception as e:
+    st.error(f"❌ Failed to connect to APIs: {e}")
+    st.stop()
 
-SHEET_NAME = "Monthly Climate Summaries"
-worksheet = client_gsheet.open(SHEET_NAME).sheet1
-rows = worksheet.get_all_values()
-headers = rows[0]
-data = rows[1:]
-df = pd.DataFrame(data, columns=headers)
+# --- Load Google Sheet ---
+try:
+    SHEET_NAME = "Monthly Climate Summaries"
+    worksheet = client_gsheet.open(SHEET_NAME).sheet1
+    rows = worksheet.get_all_values()
+    headers = rows[0]
+    data = rows[1:]
+    df = pd.DataFrame(data, columns=headers)
+except Exception as e:
+    st.error(f"❌ Could not load data from Google Sheets: {e}")
+    st.stop()
 
-# --- Data Parsing ---
+# --- Helper Functions ---
 def extract_month(summary_text):
     try:
         if "Relevance to Arm:" in summary_text:
@@ -50,19 +72,20 @@ def extract_themes(summary):
     lines = summary.splitlines()
     keywords = []
     for line in lines:
-        if any(term in line.lower() for term in ["net zero", "scope", "emission", "datacenter", "energy", "regulation", "supply chain", "ai"]):
+        if any(term in line.lower() for term in [
+            "net zero", "scope", "emission", "datacenter", "energy",
+            "regulation", "supply chain", "ai"
+        ]):
             words = re.findall(r"\b[a-zA-Z]{4,}\b", line)
             keywords.extend([w.lower() for w in words if w.lower() not in ENGLISH_STOP_WORDS])
     return keywords
 
+# --- Parse Data ---
 df["Month"] = df["gpt_summary"].apply(extract_month)
 df["Relevance"] = df["gpt_summary"].apply(extract_relevance)
 df["Themes"] = df["gpt_summary"].apply(extract_themes)
 
-# --- UI ---
-st.title("🌍 Arm Climate Trends Dashboard")
-st.markdown(f"⏱ Last updated: **{datetime.now().strftime('%d %B %Y')}**")
-
+# --- Filters ---
 available_months = sorted(df["Month"].unique(), reverse=True)
 selected_month = st.selectbox("📅 View month:", available_months)
 df_filtered = df[df["Month"] == selected_month]
@@ -81,7 +104,7 @@ def relevance_filter(summary):
 df_filtered = df_filtered[df_filtered["category"].isin(selected_categories)]
 df_filtered = df_filtered[df_filtered["gpt_summary"].apply(relevance_filter)]
 
-# --- GPT Monthly Overview ---
+# --- GPT Overview ---
 st.markdown("## 🧠 What to Know This Month")
 try:
     top_summaries = "\n\n".join(df_filtered["gpt_summary"].head(10).tolist())
@@ -102,63 +125,54 @@ Return exactly 5 bullet points.
     )
     st.markdown(response.choices[0].message.content.strip())
 except Exception as e:
-    st.warning(f"⚠️ Could not generate overview: {e}")
+    st.warning(f"⚠️ GPT summary generation failed: {e}")
 
 # --- Monthly Stats ---
 st.markdown("## 📊 Monthly Stats & Mentions")
+try:
+    total = len(df_filtered)
+    high_relevance = len(df_filtered[df_filtered["Relevance"] == "High"])
+    mention_list = df_filtered["gpt_summary"].apply(extract_mentions).sum()
+    top_mentions = Counter(mention_list).most_common(5)
 
-total = len(df_filtered)
-high_relevance = len(df_filtered[df_filtered["Relevance"] == "High"])
+    st.markdown(f"- 🔢 Total summaries: **{total}**")
+    st.markdown(f"- 🎯 High relevance to Arm: **{high_relevance}**")
+    st.markdown("- 🏢 Top Industry Mentions:")
+    for name, count in top_mentions:
+        st.markdown(f"  - {name} ({count} mentions)")
+except Exception as e:
+    st.warning(f"⚠️ Could not calculate summary stats: {e}")
 
-mention_list = df_filtered["gpt_summary"].apply(extract_mentions).sum()
-top_mentions = Counter(mention_list).most_common(5)
-
-st.markdown(f"- 🔢 Total summaries: **{total}**")
-st.markdown(f"- 🎯 High relevance to Arm: **{high_relevance}**")
-st.markdown("- 🏢 Top Industry Mentions:")
-for name, count in top_mentions:
-    st.markdown(f"  - {name} ({count} mentions)")
-
-# --- Theme Trend Chart ---
+# --- Theme Chart ---
 st.markdown("## 📈 Trending Topics This Month")
+try:
+    theme_list = df_filtered["Themes"].sum()
+    top_themes = Counter(theme_list).most_common(10)
+    theme_df = pd.DataFrame(top_themes, columns=["Theme", "Count"])
+    fig = px.bar(theme_df, x="Theme", y="Count", color="Theme", title="Top Themes", template="plotly_white")
+    st.plotly_chart(fig, use_container_width=True)
+except Exception as e:
+    st.warning(f"⚠️ Could not generate theme chart: {e}")
 
-theme_list = df_filtered["Themes"].sum()
-top_themes = Counter(theme_list).most_common(10)
-theme_df = pd.DataFrame(top_themes, columns=["Theme", "Count"])
-
-fig = px.bar(
-    theme_df,
-    x="Theme",
-    y="Count",
-    title="Top Themes in Article Summaries",
-    color="Theme",
-    template="plotly_white"
-)
-st.plotly_chart(fig, use_container_width=True)
-
-# --- Spotlight Panel ---
+# --- Spotlight Section ---
 st.markdown("## 🎯 High-Relevance Spotlight (Top 10 Only)")
+try:
+    spotlight = df_filtered[df_filtered["Relevance"] == "High"].head(10)
+    if spotlight.empty:
+        st.info("No high-relevance articles found for this month.")
+    else:
+        for _, row in spotlight.iterrows():
+            st.markdown("----")
+            st.markdown(f"🟢 **{row['original_title']}**")
+            st.markdown(f"📎 [Link to article]({row['link']})")
+            st.markdown(f"🏷️ Category: `{row['category']}`")
+            st.markdown(f"📝 {row['gpt_summary'].split('Summary:', 1)[-1].strip()}")
+except Exception as e:
+    st.warning(f"⚠️ Spotlight failed: {e}")
 
-spotlight = df_filtered[df_filtered["Relevance"] == "High"].head(10)
-if spotlight.empty:
-    st.info("No high-relevance articles found for this month.")
-else:
-    for _, row in spotlight.iterrows():
-        st.markdown("----")
-        st.markdown(f"🟢 **{row['original_title']}**")
-        st.markdown(f"📎 [Link to article]({row['link']})")
-        st.markdown(f"🏷️ Category: `{row['category']}`")
-        st.markdown(f"📝 {row['gpt_summary'].split('Summary:', 1)[-1].strip()}")
-
-# --- Full Article List ---
-st.markdown("## 📚 All Filtered Summaries")
-for _, row in df_filtered.iterrows():
-    st.markdown("----")
-    st.subheader(row["original_title"])
-    st.markdown(f"📎 [Link to article]({row['link']})")
-    st.markdown(f"🏷️ Category: `{row['category']}`")
-    st.markdown(f"📝 {row['gpt_summary']}")
-
-# --- CSV Download ---
-csv = df_filtered.to_csv(index=False).encode("utf-8")
-st.download_button("📥 Download this month's summaries (CSV)", csv, file_name=f"{selected_month}_summaries.csv")
+# --- Download CSV ---
+try:
+    csv = df_filtered.to_csv(index=False).encode("utf-8")
+    st.download_button("📥 Download this month's summaries (CSV)", csv, file_name=f"{selected_month}_summaries.csv")
+except Exception as e:
+    st.warning(f"⚠️ CSV download failed: {e}")
